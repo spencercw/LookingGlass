@@ -37,6 +37,7 @@ struct Inst
   VkPhysicalDevice physicalDevice;
   uint32_t         queueFamilyIndex;
   VkDevice         device;
+  VkQueue          queue;
   VkShaderModule   vertexShader;
   VkShaderModule   fragmentShader;
   VkCommandPool    commandPool;
@@ -129,6 +130,9 @@ static void vulkan_freeFramebuffers(struct Inst * this)
 static void vulkan_deinitialize(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+
+  if (this->device)
+    vkDeviceWaitIdle(this->device);
 
   vulkan_freeFramebuffers(this);
   
@@ -585,7 +589,7 @@ static bool vulkan_createGraphicsPipeline(struct Inst * this)
     .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     .pNext = NULL,
     .flags = 0,
-    .topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP,
+    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
     .primitiveRestartEnable = VK_FALSE
   };
 
@@ -827,7 +831,6 @@ static bool vulkan_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor 
 static bool vulkan_onMouseEvent(LG_Renderer * renderer, const bool visible,
     int x, int y, const int hx, const int hy)
 {
-  DEBUG_ERROR("vulkan_onMouseEvent not implemented");
   return true;
 }
 
@@ -985,8 +988,7 @@ err:
   return NULL;
 }
 
-static VkDevice vulkan_createDevice(VkInstance instance,
-    VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex)
+static bool vulkan_createDevice(struct Inst * this)
 {
   float queuePriority = 1.0f;
 
@@ -995,7 +997,7 @@ static VkDevice vulkan_createDevice(VkInstance instance,
     .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
     .pNext = NULL,
     .flags = 0,
-    .queueFamilyIndex = queueFamilyIndex,
+    .queueFamilyIndex = this->queueFamilyIndex,
     .queueCount = 1,
     .pQueuePriorities = &queuePriority
   };
@@ -1018,15 +1020,17 @@ static VkDevice vulkan_createDevice(VkInstance instance,
     .ppEnabledExtensionNames = extensions
   };
 
-  VkDevice device;
-  VkResult result = vkCreateDevice(physicalDevice, &createInfo, NULL, &device);
+  VkResult result = vkCreateDevice(this->physicalDevice, &createInfo, NULL,
+      &this->device);
   if (result != VK_SUCCESS)
   {
     DEBUG_ERROR("Failed to create Vulkan device (VkResult: %d)", result);
-    return NULL;
+    return false;
   }
 
-  return device;
+  vkGetDeviceQueue(this->device, this->queueFamilyIndex, 0, &this->queue);
+
+  return true;
 }
 
 static bool vulkan_loadShader(struct Inst * this, const char * spv, size_t len,
@@ -1198,9 +1202,7 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!this->physicalDevice)
     goto err_surf;
 
-  this->device = vulkan_createDevice(this->instance, this->physicalDevice,
-      this->queueFamilyIndex);
-  if (!this->device)
+  if (!vulkan_createDevice(this))
     goto err_surf;
 
   if (!vulkan_loadShader(this, b_shader_basic_vert_spv,
@@ -1259,6 +1261,7 @@ err_vert_shader:
 err_device:
   vkDestroyDevice(this->device, NULL);
   this->device = NULL;
+  this->queue = NULL;
 
 err_surf:
   vkDestroySurfaceKHR(this->instance, this->surface, NULL);
@@ -1272,12 +1275,165 @@ err:
   return false;
 }
 
+static uint32_t vulkan_acquireSwapchainImage(struct Inst * this)
+{
+  uint32_t imageIndex;
+  VkResult result = vkAcquireNextImageKHR(this->device, this->swapchain,
+      UINT64_MAX, this->swapchainAcquireSemaphore, NULL, &imageIndex);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to acquire swapchain image (VkResult: %d)", result);
+    return UINT32_MAX;
+  }
+
+  return imageIndex;
+}
+
+static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex)
+{
+  struct VkCommandBufferBeginInfo beginInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    .pNext = NULL,
+    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    .pInheritanceInfo = NULL
+  };
+
+  VkResult result = vkBeginCommandBuffer(this->commandBuffer, &beginInfo);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to begin command buffer (VkResult: %d)", result);
+    return false;
+  }
+
+  VkViewport viewport =
+  {
+    .x = 0.0f,
+    .y = 0.0f,
+    .width = (float) this->swapchainExtent.width,
+    .height = (float) this->swapchainExtent.height,
+    .minDepth = 0.0f,
+    .maxDepth = 1.0f,
+  };
+
+  vkCmdSetViewport(this->commandBuffer, 0, 1, &viewport);
+
+  VkRect2D renderArea =
+  {
+    .offset.x = 0,
+    .offset.y = 0,
+    .extent = this->swapchainExtent
+  };
+
+  vkCmdSetScissor(this->commandBuffer, 0, 1, &renderArea);
+
+  struct VkRenderPassBeginInfo renderPassBegin =
+  {
+    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+    .pNext = NULL,
+    .renderPass = this->renderPass,
+    .framebuffer = this->framebuffers[imageIndex],
+    .renderArea = renderArea,
+    .clearValueCount = 0,
+    .pClearValues = NULL
+  };
+
+  vkCmdBeginRenderPass(this->commandBuffer, &renderPassBegin,
+      VK_SUBPASS_CONTENTS_INLINE);
+
+  vkCmdBindPipeline(this->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      this->pipeline);
+
+  vkCmdDraw(this->commandBuffer, 4, 1, 0, 0);
+
+  vkCmdEndRenderPass(this->commandBuffer);
+
+  result = vkEndCommandBuffer(this->commandBuffer);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to end command buffer (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
 static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     const bool newFrame, const bool invalidateWindow,
     void (*preSwap)(void * udata), void * udata)
 {
-  DEBUG_ERROR("vulkan_render not implemented");
+  struct Inst * this = UPCAST(struct Inst, renderer);
+
+  uint32_t imageIndex = vulkan_acquireSwapchainImage(this);
+  if (imageIndex == UINT32_MAX)
+    goto err;
+
+  if (!vulkan_recordCommandBuffer(this, imageIndex))
+    goto err;
+
+  VkPipelineStageFlags waitDstStageMask =
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+  struct VkSubmitInfo submitInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+    .pNext = NULL,
+    .waitSemaphoreCount = 1,
+    .pWaitSemaphores = &this->swapchainAcquireSemaphore,
+    .pWaitDstStageMask = &waitDstStageMask,
+    .commandBufferCount = 1,
+    .pCommandBuffers = &this->commandBuffer,
+    .signalSemaphoreCount = 1,
+    .pSignalSemaphores = &this->swapchainReleaseSemaphore
+  };
+
+  VkResult result = vkQueueSubmit(this->queue, 1, &submitInfo, this->fence);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to submit command buffer (VkResult: %d)", result);
+    goto err;
+  }
+
+  VkPresentInfoKHR presentInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+    .pNext = NULL,
+    .waitSemaphoreCount = 1,
+    .pWaitSemaphores = &this->swapchainReleaseSemaphore,
+    .swapchainCount = 1,
+    .pSwapchains = &this->swapchain,
+    .pImageIndices = &imageIndex,
+    .pResults = NULL
+  };
+
+  result = vkQueuePresentKHR(this->queue, &presentInfo);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to present swapchain image (VkResult: %d)", result);
+    goto err_wait;
+  }
+
+  result = vkWaitForFences(this->device, 1, &this->fence, VK_TRUE, UINT64_MAX);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to wait for fence (VkResult: %d)", result);
+    goto err_wait;
+  }
+
+  result = vkResetFences(this->device, 1, &this->fence);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to reset fence (VkResult: %d)", result);
+    goto err_wait;
+  }
+
   return true;
+
+err_wait:
+  vkQueueWaitIdle(this->queue);
+
+err:
+  return false;
 }
 
 static void * vulkan_createTexture(LG_Renderer * renderer,
