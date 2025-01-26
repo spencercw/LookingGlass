@@ -627,17 +627,18 @@ int main_frameThread(void * unused)
     if (!g_state.formatValid || frame->formatVer != formatVer)
     {
       // setup the renderer format with the frame format details
-      lgrFormat.type         = frame->type;
-      lgrFormat.screenWidth  = frame->screenWidth;
-      lgrFormat.screenHeight = frame->screenHeight;
-      lgrFormat.dataWidth    = frame->dataWidth;
-      lgrFormat.dataHeight   = frame->dataHeight;
-      lgrFormat.frameWidth   = frame->frameWidth;
-      lgrFormat.frameHeight  = frame->frameHeight;
-      lgrFormat.stride       = frame->stride;
-      lgrFormat.pitch        = frame->pitch;
-      lgrFormat.hdr          = frame->flags & FRAME_FLAG_HDR;
-      lgrFormat.hdrPQ        = frame->flags & FRAME_FLAG_HDR_PQ;
+      lgrFormat.type          = frame->type;
+      lgrFormat.screenWidth   = frame->screenWidth;
+      lgrFormat.screenHeight  = frame->screenHeight;
+      lgrFormat.dataWidth     = frame->dataWidth;
+      lgrFormat.dataHeight    = frame->dataHeight;
+      lgrFormat.frameWidth    = frame->frameWidth;
+      lgrFormat.frameHeight   = frame->frameHeight;
+      lgrFormat.stride        = frame->stride;
+      lgrFormat.pitch         = frame->pitch;
+      lgrFormat.hdr           = frame->flags & FRAME_FLAG_HDR;
+      lgrFormat.hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
+      lgrFormat.colorMetadata = frame->colorMetadata;
 
       if (frame->flags & FRAME_FLAG_TRUNCATED)
       {
@@ -715,6 +716,22 @@ int main_frameThread(void * unused)
           frame->rotation,
           frame->flags & FRAME_FLAG_HDR    ? 1 : 0,
           frame->flags & FRAME_FLAG_HDR_PQ ? 1 : 0);
+
+      if (frame->flags & FRAME_FLAG_HDR)
+      {
+        DEBUG_INFO("HDR metadata :");
+        DEBUG_INFO("Red primary  : %.3f, %.3f", frame->colorMetadata.redPrimaryX,
+            frame->colorMetadata.redPrimaryY);
+        DEBUG_INFO("Green primary: %.3f, %.3f", frame->colorMetadata.greenPrimaryX,
+            frame->colorMetadata.greenPrimaryY);
+        DEBUG_INFO("Blue primary : %.3f, %.3f", frame->colorMetadata.bluePrimaryX,
+            frame->colorMetadata.bluePrimaryY);
+        DEBUG_INFO("White point  : %.3f, %.3f", frame->colorMetadata.whitePointX,
+            frame->colorMetadata.whitePointY);
+        DEBUG_INFO("Min luminance: %.3f", frame->colorMetadata.minLuminance);
+        DEBUG_INFO("Max luminance: %.3f", frame->colorMetadata.maxLuminance);
+        DEBUG_INFO("Max full frame luminance: %.3f", frame->colorMetadata.maxFullFrameLuminance);
+      }
 
       LG_LOCK(g_state.lgrLock);
       if (!RENDERER(onFrameFormat, lgrFormat))
