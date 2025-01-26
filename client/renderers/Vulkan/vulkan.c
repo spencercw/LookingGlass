@@ -35,6 +35,9 @@ struct Inst
   VkDevice         device;
   VkCommandPool    commandPool;
   VkCommandBuffer  commandBuffer;
+  VkSemaphore      swapchainAcquireSemaphore;
+  VkSemaphore      swapchainReleaseSemaphore;
+  VkFence          fence;
 
   VkSwapchainKHR   swapchain;
   VkFormat         swapchainFormat;
@@ -125,6 +128,15 @@ static void vulkan_deinitialize(LG_Renderer * renderer)
     vkDestroyRenderPass(this->device, this->renderPass, NULL);
 
   vulkan_freeSwapchain(this);
+
+  if (this->fence)
+    vkDestroyFence(this->device, this->fence, NULL);
+
+  if (this->swapchainReleaseSemaphore)
+    vkDestroySemaphore(this->device, this->swapchainReleaseSemaphore, NULL);
+
+  if (this->swapchainAcquireSemaphore)
+    vkDestroySemaphore(this->device, this->swapchainAcquireSemaphore, NULL);
 
   if (this->commandPool)
     vkDestroyCommandPool(this->device, this->commandPool, NULL);
@@ -866,6 +878,46 @@ static bool vulkan_allocateCommandBuffer(struct Inst * this)
   return true;
 }
 
+static bool vulkan_createSemaphore(struct Inst * this, VkSemaphore *semaphore)
+{
+  struct VkSemaphoreCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+  };
+
+  VkResult result = vkCreateSemaphore(this->device, &createInfo, NULL,
+      semaphore);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create semaphore (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
+static bool vulkan_createFence(struct Inst * this)
+{
+  struct VkFenceCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+  };
+
+  VkResult result = vkCreateFence(this->device, &createInfo, NULL,
+      &this->fence);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create fence (VkResult: %d)", result);
+    return false;
+  }
+
+  return true;
+}
+
 static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
@@ -894,7 +946,24 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!vulkan_allocateCommandBuffer(this))
     goto err_command_pool;
 
+  if (!vulkan_createSemaphore(this, &this->swapchainAcquireSemaphore))
+    goto err_command_pool;
+
+  if (!vulkan_createSemaphore(this, &this->swapchainReleaseSemaphore))
+    goto err_swapchain_acq_sem;
+
+  if (!vulkan_createFence(this))
+    goto err_swapchain_rel_sem;
+
   return true;
+
+err_swapchain_rel_sem:
+  vkDestroySemaphore(this->device, this->swapchainReleaseSemaphore, NULL);
+  this->swapchainReleaseSemaphore = NULL;
+
+err_swapchain_acq_sem:
+  vkDestroySemaphore(this->device, this->swapchainAcquireSemaphore, NULL);
+  this->swapchainAcquireSemaphore = NULL;
 
 err_command_pool:
   vkDestroyCommandPool(this->device, this->commandPool, NULL);
