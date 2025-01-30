@@ -46,7 +46,9 @@ build_vulkan_shaders(
 
 add_library(renderer_Vulkan STATIC
   extensions.c
+  imgui.c
   vulkan.c
+  vulkan_util.c
   ${VULKAN_VERT_SHADER_OBJS}
   ${VULKAN_FRAG_SHADER_OBJS}
 )
