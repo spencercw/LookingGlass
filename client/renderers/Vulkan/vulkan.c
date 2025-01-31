@@ -1059,10 +1059,14 @@ static bool vulkan_initPipeline(struct Inst * this)
 
       if (!vulkan_createGraphicsPipeline(this))
         goto err_render_pass;
+
+      if (!vulkan_imGuiInitPipeline(this->imGui, this->swapchainImageCount,
+          this->renderPass))
+        goto err_pipeline;
     }
-    
+
     if (!vulkan_createFramebuffers(this))
-      goto err_pipeline;
+      goto err_imgui;
   }
 
   if (this->format.type == FRAME_TYPE_INVALID)
@@ -1085,10 +1089,19 @@ static bool vulkan_initPipeline(struct Inst * this)
     }
   }
 
+  if (!vulkan_imGuiUploadFonts(this->imGui))
+    goto err_desktop_image;
+
   return true;
+
+err_desktop_image:
+  vulkan_freeDesktopImage(this);
 
 err_framebuffers:
   vulkan_freeFramebuffers(this);
+
+err_imgui:
+  vulkan_imGuiDeinitPipeline(this->imGui);
 
 err_pipeline:
   vkDestroyPipeline(this->device, this->pipeline, NULL);
@@ -1556,7 +1569,7 @@ static bool vulkan_createDescriptorPool(struct Inst * this)
     },
     {
       .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-      .descriptorCount = 4
+      .descriptorCount = 8
     }
   };
 
@@ -1564,8 +1577,8 @@ static bool vulkan_createDescriptorPool(struct Inst * this)
   {
     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
     .pNext = NULL,
-    .flags = 0,
-    .maxSets = 4,
+    .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+    .maxSets = 8,
     .poolSizeCount = 2,
     .pPoolSizes = poolSizes
   };
@@ -1719,7 +1732,8 @@ static bool vulkan_renderStartup(LG_Renderer * renderer, bool useDMA)
   if (!vulkan_createDesktopUniformBuffer(this))
     goto err_fence;
 
-  if (!vulkan_imGuiInit(&this->imGui, &this->memoryProperties, this->device,
+  if (!vulkan_imGuiInit(&this->imGui, this->instance, this->physicalDevice,
+      this->queueFamilyIndex, &this->memoryProperties, this->device,
       this->queue, this->commandBuffer, this->sampler, this->descriptorPool,
       this->fence))
     goto err_desktop_uniform;
@@ -1805,7 +1819,8 @@ static uint32_t vulkan_acquireSwapchainImage(struct Inst * this)
 
 static void vulkan_preRenderBarrier(struct Inst * this)
 {
-  if (this->desktopImageLayout == VK_IMAGE_LAYOUT_GENERAL)
+  if (!this->desktopImage ||
+      this->desktopImageLayout == VK_IMAGE_LAYOUT_GENERAL)
     return;
 
   struct VkImageMemoryBarrier desktopImageBarrier =
@@ -1833,7 +1848,8 @@ static void vulkan_preRenderBarrier(struct Inst * this)
   this->desktopImageLayout = desktopImageBarrier.newLayout;
 }
 
-static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex)
+static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex,
+    bool drawImGui)
 {
   struct VkCommandBufferBeginInfo beginInfo =
   {
@@ -1898,10 +1914,16 @@ static bool vulkan_recordCommandBuffer(struct Inst * this, uint32_t imageIndex)
   vkCmdBindPipeline(this->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
       this->pipeline);
 
-  vkCmdBindDescriptorSets(this->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-      this->pipelineLayout, 0, 1, &this->descriptorSet, 0, NULL);
+  if (this->desktopImage)
+  {
+    vkCmdBindDescriptorSets(this->commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        this->pipelineLayout, 0, 1, &this->descriptorSet, 0, NULL);
 
-  vkCmdDraw(this->commandBuffer, 4, 1, 0, 0);
+    vkCmdDraw(this->commandBuffer, 4, 1, 0, 0);
+  }
+
+  if (drawImGui)
+    vulkan_imGuiRecordCommandBuffer(this->imGui);
 
   vkCmdEndRenderPass(this->commandBuffer);
 
@@ -2020,11 +2042,9 @@ static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
-  if (!this->desktopImage)
-  {
-    DEBUG_WARN("No desktop image; skipping render");
-    return true;
-  }
+  struct Rect damage[KVMFR_MAX_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
+  int damageIdx = app_renderOverlay(damage, MAX_OVERLAY_RECTS);
+  bool drawImGui = damageIdx != 0;
 
   vulkan_updateDesktopUniformBuffer(this, rotate);
 
@@ -2032,7 +2052,7 @@ static bool vulkan_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   if (imageIndex == UINT32_MAX)
     goto err;
 
-  if (!vulkan_recordCommandBuffer(this, imageIndex))
+  if (!vulkan_recordCommandBuffer(this, imageIndex, drawImGui))
     goto err;
 
   VkPipelineStageFlags waitDstStageMask =
