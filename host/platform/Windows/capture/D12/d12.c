@@ -28,7 +28,6 @@
 #include "common/option.h"
 #include "common/rects.h"
 #include "common/vector.h"
-#include "common/display.h"
 #include "com_ref.h"
 
 #include "backend.h"
@@ -48,8 +47,7 @@ struct D12Interface
   IDXGIFactory2      ** factory;
   ID3D12Device3      ** device;
 
-  DISPLAYCONFIG_PATH_INFO displayPathInfo;
-  ColorMetadata           colorMetadata;
+  ColorMetadata         colorMetadata;
 
   ID3D12CommandQueue ** copyQueue;
   ID3D12CommandQueue ** computeQueue;
@@ -285,11 +283,6 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
 
   DXGI_OUTPUT_DESC1 desc1;
   IDXGIOutput6_GetDesc1(*output6, &desc1);
-  if (!display_getPathInfo(desc1.Monitor, &this->displayPathInfo))
-  {
-    DEBUG_ERROR("Failed to get the display path info");
-    goto exit;
-  }
 
   this->colorMetadata.redPrimaryX = desc1.RedPrimary[0];
   this->colorMetadata.redPrimaryY = desc1.RedPrimary[1];
@@ -406,7 +399,7 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
   for(const D12Effect ** effect = D12Effects; *effect; ++effect)
   {
     D12Effect * instance;
-    switch(d12_effectCreate(*effect, &instance, *device, &this->displayPathInfo))
+    switch(d12_effectCreate(*effect, &instance, *device))
     {
       case D12_EFFECT_STATUS_OK:
         DEBUG_INFO("D12 Created Effect: %s", (*effect)->name);
@@ -634,7 +627,7 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
   frame->format           = this->dstFormat.format;
   frame->hdr              = this->dstFormat.colorSpace ==
     DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-  frame->hdrPQ            = false;
+  frame->hdrPQ            = this->dstFormat.format == CAPTURE_FMT_RGBA10;
   frame->rotation         = desc.rotation;
   frame->colorMetadata    = this->colorMetadata;
 
