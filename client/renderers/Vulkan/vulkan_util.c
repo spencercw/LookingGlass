@@ -20,6 +20,7 @@
 
 #include "vulkan_util.h"
 
+#include "common/array.h"
 #include "common/debug.h"
 
 #include <string.h>
@@ -264,7 +265,7 @@ VkPipeline vulkan_createGraphicsPipeline(VkDevice device,
     .pDynamicState = &dynamicState,
     .layout = pipelineLayout,
     .renderPass = renderPass,
-    .subpass = 0,
+    .subpass = 1,
     .basePipelineHandle = NULL,
     .basePipelineIndex = 0
   };
@@ -438,13 +439,20 @@ bool vulkan_waitFence(VkDevice device, VkFence fence)
 }
 
 void vulkan_updateDescriptorSet0(VkDevice device, VkDescriptorSet descriptorSet,
-    VkImageView imageView)
+    VkImageView swapchainImageView, VkImageView imGuiImageView)
 {
-  struct VkDescriptorImageInfo imageInfo =
+  struct VkDescriptorImageInfo imageInfos[] =
   {
-    .sampler = NULL,
-    .imageView = imageView,
-    .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    {
+      .sampler = NULL,
+      .imageView = swapchainImageView,
+      .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    },
+    {
+      .sampler = NULL,
+      .imageView = imGuiImageView,
+      .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    }
   };
 
   struct VkWriteDescriptorSet descriptorWrites[] =
@@ -455,9 +463,9 @@ void vulkan_updateDescriptorSet0(VkDevice device, VkDescriptorSet descriptorSet,
       .dstSet = descriptorSet,
       .dstBinding = 0,
       .dstArrayElement = 0,
-      .descriptorCount = 1,
+      .descriptorCount = ARRAY_LENGTH(imageInfos),
       .descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-      .pImageInfo = &imageInfo,
+      .pImageInfo = imageInfos,
       .pBufferInfo = NULL,
       .pTexelBufferView = NULL
     }

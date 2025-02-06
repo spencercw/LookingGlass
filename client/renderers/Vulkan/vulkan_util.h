@@ -27,6 +27,14 @@
 
 #include "interface/renderer.h"
 
+typedef enum ShaderColorSpace
+{
+  SHADER_COLOR_SPACE_SRGB,
+  SHADER_COLOR_SPACE_EXTENDED_SRGB_LINEAR,
+  SHADER_COLOR_SPACE_HDR10_ST2084,
+}
+ShaderColorSpace;
+
 struct VulkanUniformBuffer
 {
   float transform[16];
@@ -61,8 +69,9 @@ VkImageView vulkan_createImageView(VkDevice device, VkImage image,
 
 bool vulkan_waitFence(VkDevice device, VkFence fence);
 
+//todo maybe move to vulkan.c
 void vulkan_updateDescriptorSet0(VkDevice device, VkDescriptorSet descriptorSet,
-    VkImageView imageView);
+    VkImageView swapchainImageView, VkImageView imGuiImageView);
 
 void vulkan_updateDescriptorSet1(VkDevice device, VkDescriptorSet descriptorSet,
     VkBuffer uniformBuffer, VkImageView imageView, VkImageLayout imageLayout);
