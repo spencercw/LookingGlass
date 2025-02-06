@@ -42,6 +42,7 @@ build_vulkan_shaders(
   VULKAN_FRAG_SHADER
   frag
   shader/basic.frag
+  shader/cursor_rgb.frag
 )
 
 add_library(renderer_Vulkan STATIC
