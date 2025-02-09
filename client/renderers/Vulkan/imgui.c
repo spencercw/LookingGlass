@@ -20,6 +20,7 @@
 
 #include "imgui.h"
 
+#include "common/array.h"
 #include "common/debug.h"
 #include "common/vector.h"
 
@@ -68,27 +69,14 @@ static bool createDescriptorSetLayout(Vulkan_ImGui * this, VkSampler sampler)
       .binding = 0,
       .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
       .descriptorCount = 1,
-      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
     },
   };
 
-  struct VkDescriptorSetLayoutCreateInfo createInfo =
-  {
-    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    .pNext = NULL,
-    .flags = 0,
-    .bindingCount = 1,
-    .pBindings = bindings
-  };
-
-  VkResult result = vkCreateDescriptorSetLayout(this->device, &createInfo, NULL,
-      &this->descriptorSetLayout);
-  if (result != VK_SUCCESS)
-  {
-    DEBUG_ERROR("Failed to create descriptor set layout (VkResult: %d)",
-        result);
+  this->descriptorSetLayout = vulkan_createDescriptorSetLayout(this->device,
+      ARRAY_LENGTH(bindings), bindings);
+  if (!this->descriptorSetLayout)
     return false;
-  }
 
   return true;
 }

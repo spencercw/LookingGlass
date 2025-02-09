@@ -75,6 +75,74 @@ VkDeviceMemory vulkan_allocateMemory(
   return memory;
 }
 
+VkShaderModule vulkan_loadShader(VkDevice device, const char * spv, size_t len)
+{
+  if (len % 4 != 0)
+  {
+    DEBUG_ERROR("SPIR-V length is not a multiple of 4");
+    goto err;
+  }
+
+  uint32_t *spvAligned = aligned_alloc(4, len);
+  if (!spvAligned)
+  {
+    DEBUG_ERROR("out of memory");
+    goto err;
+  }
+  memcpy(spvAligned, spv, len);
+
+  struct VkShaderModuleCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .codeSize = len,
+    .pCode = spvAligned,
+  };
+
+  VkShaderModule shader;
+  VkResult result = vkCreateShaderModule(device, &createInfo, NULL, &shader);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create shader module (VkResult: %d)", result);
+    goto err_spv;
+  }
+
+  free(spvAligned);
+  return shader;
+
+err_spv:
+  free(spvAligned);
+
+err:
+  return NULL;
+}
+
+VkDescriptorSetLayout vulkan_createDescriptorSetLayout(VkDevice device,
+    uint32_t bindingCount, struct VkDescriptorSetLayoutBinding * bindings)
+{
+  struct VkDescriptorSetLayoutCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .bindingCount = bindingCount,
+    .pBindings = bindings
+  };
+
+  VkDescriptorSetLayout descriptorSetLayout;
+  VkResult result = vkCreateDescriptorSetLayout(device, &createInfo, NULL,
+      &descriptorSetLayout);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create descriptor set layout (VkResult: %d)",
+        result);
+    return NULL;
+  }
+
+  return descriptorSetLayout;
+}
+
 VkDescriptorSet vulkan_allocateDescriptorSet(VkDevice device,
     VkDescriptorSetLayout layout, VkDescriptorPool descriptorPool)
 {
@@ -97,6 +165,32 @@ VkDescriptorSet vulkan_allocateDescriptorSet(VkDevice device,
   }
 
   return descriptorSet;
+}
+
+VkPipelineLayout vulkan_createPipelineLayout(VkDevice device,
+    VkDescriptorSetLayout setLayout)
+{
+  struct VkPipelineLayoutCreateInfo createInfo =
+  {
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    .pNext = NULL,
+    .flags = 0,
+    .setLayoutCount = 1,
+    .pSetLayouts = &setLayout,
+    .pushConstantRangeCount = 0,
+    .pPushConstantRanges = NULL
+  };
+
+  VkPipelineLayout pipelineLayout;
+  VkResult result = vkCreatePipelineLayout(device, &createInfo, NULL,
+      &pipelineLayout);
+  if (result != VK_SUCCESS)
+  {
+    DEBUG_ERROR("Failed to create pipeline layout (VkResult: %d)", result);
+    return NULL;
+  }
+
+  return pipelineLayout;
 }
 
 VkBuffer vulkan_createBuffer(
@@ -277,103 +371,4 @@ void vulkan_updateDescriptorSet(VkDevice device, VkDescriptorSet descriptorSet,
   };
 
   vkUpdateDescriptorSets(device, 2, descriptorWrites, 0, NULL);
-}
-
-void vulkan_updateUniformBuffer(void * bufferMap, float translateX,
-    float translateY, float scaleX, float scaleY, LG_RendererRotate rotate)
-{
-  struct VulkanUniformBuffer uniformBuffer = {};
-
-  switch (rotate)
-  {
-    case LG_ROTATE_0:
-      uniformBuffer.transform[0 * 4 + 0] = scaleX;
-      uniformBuffer.transform[0 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[1 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 1] = scaleY;
-      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
-      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[3 * 4 + 0] = translateX;
-      uniformBuffer.transform[3 * 4 + 1] = translateY;
-      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
-      break;
-
-    case LG_ROTATE_90:
-      uniformBuffer.transform[0 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 1] = scaleY;
-      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[1 * 4 + 0] = -scaleX;
-      uniformBuffer.transform[1 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
-      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[3 * 4 + 0] = translateX;
-      uniformBuffer.transform[3 * 4 + 1] = translateY;
-      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
-      break;
-
-    case LG_ROTATE_180:
-      uniformBuffer.transform[0 * 4 + 0] = -scaleX;
-      uniformBuffer.transform[0 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[1 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 1] = -scaleY;
-      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
-      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[3 * 4 + 0] = translateX;
-      uniformBuffer.transform[3 * 4 + 1] = translateY;
-      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
-      break;
-
-    case LG_ROTATE_270:
-      uniformBuffer.transform[0 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 1] = -scaleY;
-      uniformBuffer.transform[0 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[0 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[1 * 4 + 0] = scaleX;
-      uniformBuffer.transform[1 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[1 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[2 * 4 + 0] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 1] = 0.0f;
-      uniformBuffer.transform[2 * 4 + 2] = 1.0f;
-      uniformBuffer.transform[2 * 4 + 3] = 0.0f;
-
-      uniformBuffer.transform[3 * 4 + 0] = translateX;
-      uniformBuffer.transform[3 * 4 + 1] = translateY;
-      uniformBuffer.transform[3 * 4 + 2] = 0.0f;
-      uniformBuffer.transform[3 * 4 + 3] = 1.0f;
-      break;
-  }
-
-  memcpy(bufferMap, &uniformBuffer, sizeof(uniformBuffer));
 }

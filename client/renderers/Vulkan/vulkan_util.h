@@ -27,11 +27,6 @@
 
 #include "interface/renderer.h"
 
-struct VulkanUniformBuffer
-{
-  float transform[16];
-};
-
 uint32_t vulkan_findMemoryType(
     struct VkPhysicalDeviceMemoryProperties * memoryProperties,
     uint32_t memoryTypeBits, VkMemoryPropertyFlags requiredProperties);
@@ -41,8 +36,16 @@ VkDeviceMemory vulkan_allocateMemory(
     VkDevice device, struct VkMemoryRequirements *memoryRequirements,
     VkMemoryPropertyFlags requiredProperties);
 
+VkShaderModule vulkan_loadShader(VkDevice device, const char * spv, size_t len);
+
+VkDescriptorSetLayout vulkan_createDescriptorSetLayout(VkDevice device,
+    uint32_t bindingCount, struct VkDescriptorSetLayoutBinding * bindings);
+
 VkDescriptorSet vulkan_allocateDescriptorSet(VkDevice device,
     VkDescriptorSetLayout layout, VkDescriptorPool descriptorPool);
+
+VkPipelineLayout vulkan_createPipelineLayout(VkDevice device,
+    VkDescriptorSetLayout setLayout);
 
 VkBuffer vulkan_createBuffer(
     struct VkPhysicalDeviceMemoryProperties * memoryProperties, VkDevice device,
@@ -56,6 +59,3 @@ bool vulkan_waitFence(VkDevice device, VkFence fence);
 
 void vulkan_updateDescriptorSet(VkDevice device, VkDescriptorSet descriptorSet,
     VkBuffer uniformBuffer, VkImageView imageView, VkImageLayout imageLayout);
-
-void vulkan_updateUniformBuffer(void * bufferMap, float translateX,
-    float translateY, float scaleX, float scaleY, LG_RendererRotate rotate);

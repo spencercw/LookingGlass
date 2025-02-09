@@ -44,6 +44,12 @@ build_vulkan_shaders(
   shader/basic.frag
 )
 
+build_vulkan_shaders(
+  VULKAN_COMP_SHADER
+  comp
+  shader/cursor_rgb.comp
+)
+
 add_library(renderer_Vulkan STATIC
   cursor.c
   extensions.c
@@ -52,6 +58,7 @@ add_library(renderer_Vulkan STATIC
   vulkan_util.c
   ${VULKAN_VERT_SHADER_OBJS}
   ${VULKAN_FRAG_SHADER_OBJS}
+  ${VULKAN_COMP_SHADER_OBJS}
   ${PROJECT_TOP}/repos/cimgui/imgui/backends/imgui_impl_vulkan.cpp
 )
 
